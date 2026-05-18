@@ -22,7 +22,7 @@ from prometheus_client import (
 app = FastAPI()
 
 # =========================================================
-# LOGGING SETUP UNTUK DEBUGGING DAN AUDIT
+# LOGGING SETUP
 # =========================================================
 logging.basicConfig(
     level=logging.INFO,
@@ -30,95 +30,85 @@ logging.basicConfig(
 )
 
 # =========================================================
-# LOAD MODEL (PASTIKAN FILE ADA DI ROOT PROJECT)
+# LOAD MODEL
 # =========================================================
 try:
     model = joblib.load("random_forest_model.pkl")
-    MODEL_READY = True
 except Exception as e:
     model = None
-    MODEL_READY = False
     logging.error(f"MODEL FAILED TO LOAD: {str(e)}")
 
 # =========================================================
-# PROMETHEUS METRICS (ADVANCED + SAFE)
+# PROMETHEUS METRICS
 # =========================================================
 
-# TOTAL REQUEST MASUK
 REQUEST_COUNT = Counter(
     "ml_request_total",
     "Total request ke inference API",
     ["endpoint", "method", "status"]
 )
 
-# ERROR COUNT
 ERROR_COUNT = Counter(
     "ml_error_total",
     "Total error pada inference API",
     ["endpoint"]
 )
 
-# LATENCY REQUEST
 REQUEST_LATENCY = Histogram(
     "ml_request_latency_seconds",
     "Latency request inference"
 )
 
-# INFERENCE TIME
 PREDICTION_TIME = Histogram(
     "ml_prediction_time_seconds",
     "Waktu proses model prediksi"
 )
 
-# DISTRIBUSI HASIL PREDIKSI
 PREDICTION_CLASS = Counter(
     "ml_prediction_class_total",
     "Distribusi kelas hasil prediksi",
     ["predicted_class"]
 )
 
-# STATUS MODEL (1 READY, 0 NOT READY)
 MODEL_STATUS = Gauge(
     "ml_model_status",
     "Status model ML"
 )
 
-MODEL_STATUS.set(1 if MODEL_READY else 0)
-
-# REQUEST IN PROGRESS
 IN_PROGRESS = Gauge(
     "ml_requests_in_progress",
     "Request yang sedang diproses"
 )
 
 # =========================================================
-# ROOT ENDPOINT
+# ROOT
 # =========================================================
 @app.get("/")
 def root():
-    return {
-        "message": "ML Inference API Running"
-    }
+    return {"message": "ML Inference API Running"}
 
 # =========================================================
-# HEALTH CHECK ENDPOINT (WAJIB UNTUK MONITORING)
+# HEALTH CHECK
 # =========================================================
 @app.get("/health")
 def health():
+    status = 1 if model is not None else 0
+    MODEL_STATUS.set(status)
+
     return {
-        "status": "ok" if MODEL_READY else "unavailable",
-        "model_ready": MODEL_READY
+        "status": "ok" if model is not None else "unavailable",
+        "model_ready": model is not None
     }
 
 # =========================================================
-# PROMETHEUS METRICS ENDPOINT
+# METRICS ENDPOINT
 # =========================================================
 @app.get("/metrics")
 def metrics():
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 # =========================================================
-# MAIN PREDICTION ENDPOINT
+# PREDICTION ENDPOINT
 # =========================================================
 @app.post("/predict")
 async def predict(request: Request):
@@ -127,38 +117,53 @@ async def predict(request: Request):
     start_time = time.time()
 
     try:
-        # AMBIL INPUT JSON
         payload = await request.json()
 
-        # VALIDASI INPUT
         if "features" not in payload:
             raise ValueError("Missing 'features' in request body")
 
-        # CONVERT INPUT KE NUMPY ARRAY
-        features = np.array(payload["features"]).reshape(1, -1)
+        # =====================================================
+        # FEATURE SAFETY LAYER (FIX INPUT SIZE 27 FEATURES)
+        # =====================================================
+        expected_features = 27
 
-        # =====================================================
-        # PREDICTION PROCESS
-        # =====================================================
-        with PREDICTION_TIME.time():
-            prediction = model.predict(features)
+        features_input = np.array(payload["features"]).flatten()
+
+        # PAD jika kurang fitur
+        if len(features_input) < expected_features:
+            features_input = np.pad(
+                features_input,
+                (0, expected_features - len(features_input)),
+                mode="constant"
+            )
+
+        # TRUNCATE jika lebih fitur
+        elif len(features_input) > expected_features:
+            features_input = features_input[:expected_features]
+
+        # RESHAPE FINAL INPUT
+        features = features_input.reshape(1, -1)
+
+        if model is None:
+            raise ValueError("Model belum berhasil diload")
+
+        # LATENCY + PREDICTION TIME
+        with REQUEST_LATENCY.time():
+            with PREDICTION_TIME.time():
+                prediction = model.predict(features)
 
         result = str(prediction[0])
 
-        # CATAT DISTRIBUSI PREDIKSI
         PREDICTION_CLASS.labels(predicted_class=result).inc()
 
-        # LATENCY TOTAL
-        latency = time.time() - start_time
-
-        # METRICS SUCCESS REQUEST
         REQUEST_COUNT.labels(
             endpoint="/predict",
             method="POST",
             status="success"
         ).inc()
 
-        # LOGGING
+        latency = time.time() - start_time
+
         logging.info(f"PREDICT SUCCESS | RESULT={result} | LATENCY={latency:.4f}")
 
         return JSONResponse({
@@ -168,7 +173,6 @@ async def predict(request: Request):
 
     except Exception as e:
 
-        # ERROR METRICS
         ERROR_COUNT.labels(endpoint="/predict").inc()
 
         REQUEST_COUNT.labels(
