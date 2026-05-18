@@ -33,7 +33,7 @@ logging.basicConfig(
 # LOAD MODEL (PASTIKAN FILE ADA DI ROOT PROJECT)
 # =========================================================
 try:
-    model = joblib.load("model.pkl")
+    model = joblib.load("random_forest_model.pkl")
     MODEL_READY = True
 except Exception as e:
     model = None
