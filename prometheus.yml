@@ -1,1 +1,30 @@
+# GLOBAL CONFIGURATION PROMETHEUS
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
 
+# SCRAPE TARGETS
+scrape_configs:
+
+  # =====================================================
+  # PROMETHEUS ITSELF
+  # =====================================================
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # =====================================================
+  # FASTAPI INFERENCE SERVICE (SOURCE UTAMA ML METRICS)
+  # =====================================================
+  - job_name: "ml_inference_service"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["localhost:8000"]
+
+  # =====================================================
+  # EXPORTER SYSTEM MONITORING (CPU, RAM, DISK)
+  # =====================================================
+  - job_name: "ml_system_exporter"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["localhost:8001"]
