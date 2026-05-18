@@ -74,7 +74,7 @@ PREDICTION_TIME = Histogram(
 PREDICTION_CLASS = Counter(
     "ml_prediction_class_total",
     "Distribusi kelas hasil prediksi",
-    ["class"]
+    ["predicted_class"]
 )
 
 # STATUS MODEL (1 READY, 0 NOT READY)
@@ -146,7 +146,7 @@ async def predict(request: Request):
         result = str(prediction[0])
 
         # CATAT DISTRIBUSI PREDIKSI
-        PREDICTION_CLASS.labels(class=result).inc()
+        PREDICTION_CLASS.labels(predicted_class=result).inc()
 
         # LATENCY TOTAL
         latency = time.time() - start_time
